@@ -1,0 +1,187 @@
+library(RCurl)
+library("ggplot2")
+
+train= read.csv("loanprediction/input/train.csv",header=TRUE)
+test = read.csv("loanprediction/input/test.csv",header=TRUE)
+
+
+printGraph<- function(Approved,Gender,Loan_Status){
+
+ggplot(Approved, aes(x =( Gender), fill = Loan_Status)) +
+  geom_histogram(width = 0.5) +
+  facet_wrap(~Loan_Status) + 
+  ggtitle("Approved") +
+  xlab("Gender") +
+  ylab("Loan Status") +
+  labs(fill = "Loan Approved")
+
+
+}
+
+
+
+#combine the dataset(train and test) and also fomrat can done easily 
+#without duplication of code otherwise formatting need to be done in 
+#train and test.
+fmt_test<-data.frame(Loan_Status=rep("N" ,nrow(test)),test[,]); 
+combined<-rbind(fmt_test,train)
+
+###########################1.format the data.
+
+
+
+
+#1.Gender if have blank change to NS(Not specified)
+#since Gender is a factor change to character
+combined$Gender<-as.character(combined$Gender)
+#check whether it is changed from factor to character
+combined[combined$Gender=='','Gender']<-'NS'
+combined[is.nan(combined$Gender),'Gender']<-'NS'
+combined$Gender<-as.factor(combined$Gender)
+#factor(combined$Gender)
+
+
+
+
+#Note: if any column type is factor then it wont return NA if null only ""
+#e.g Married
+#2.Married 
+combined$Married<-as.character(combined$Married)
+#check whether it is changed from factor to character
+combined[combined$Married=='','Married']<-'NS'
+combined[is.nan(combined$Married),'Married']<-'NS'
+combined$Married<-as.factor(combined$Married)
+
+
+#3.Dependents
+combined$Dependents<-as.character(combined$Dependents)
+combined[combined$Dependents=='','Dependents'] <- -1
+combined[combined$Dependents=='3+','Dependents'] <- '3'
+combined$Dependents<-as.factor(combined$Dependents)
+#unique(combined$Dependents)
+
+#str(combined$Dependents)
+#check whether it is changed from factor to character
+
+
+#4.Self_Employed
+
+combined$Self_Employed<-as.character(combined$Self_Employed)
+combined[combined$Self_Employed=='','Self_Employed'] <- 'NS'
+combined$Self_Employed<-as.factor(combined$Self_Employed)
+ 
+#unique(combined$Self_Employed)
+
+
+
+
+#5.LoanAmount
+combined[which( is.na(combined$LoanAmount)  ),'LoanAmount']<- 0
+#combined[which(combined$ApplicantIncome>=combined$CoapplicantIncome),"Loan_Status"]<-'Y'
+
+#6.Loan_Amount_Term
+combined[which( is.na(combined$Loan_Amount_Term)  ),'Loan_Amount_Term']<- 0
+
+
+#7.Credit_History
+combined[which( is.na(combined$Credit_History)  ),'Credit_History']<- 0
+
+
+#to check specific record whether value is updated
+#print(result[[9]][[80]])
+
+#############################2.generate formatted excel 
+
+write.csv(file="combined.csv",combined[368:981,], row.names=F)
+
+
+
+
+#############################3. Analyze data using train generated.
+#combined$rank<- c(combined$ApplicantIncome)
+
+train<-combined[368:981,]
+test<-combined[1:367,]
+write.csv(file="train.csv",train, row.names=F)
+write.csv(file="test.csv",test, row.names=F)
+#to check loan amount which is zero
+Approved<-train[which(train$Loan_Status %in% c('Y')
+),c("Loan_ID","Loan_Status","LoanAmount","Credit_History","Gender")]
+ 
+
+Rejected<-train[which(train$Loan_Status %in% c('N')
+),c("Loan_ID","Loan_Status","LoanAmount","Credit_History","Gender")]
+ 
+
+
+
+
+
+#printGraph(Approved,Gender,Loan_Status)
+#To check which loan Amount on the approved loan
+#quantile(Approved$LoanAmount , probs=c(0, 0.25, 0.5, 0.75, 1.0),na.rm=F)
+
+#############################4. predict the loan_status
+library(randomForest)
+
+
+#filter <- train[which(train$Gender!='NS' & train$Dependents!=-1 & train$Self_Employed!='NS'),] 
+#train<- data.frame(filter)
+#write.csv(file="train.csv",trainf, row.names=F)
+
+set.seed(nrow(train))
+formula <- Loan_Status ~ Gender+Married+Dependents+Education+ Self_Employed+ApplicantIncome +CoapplicantIncome+LoanAmount+
+Loan_Amount_Term+Credit_History+Property_Area
+
+
+ 
+#formula <- Loan_Status ~ Loan_Amount_Term+Credit_History
+
+#replace<-TRUE
+#samplesize<-if(replace) nrow(train) else ceiling(.632*nrow(train))
+
+
+
+#rf <- randomForest(formula,
+#data=train,ntree=32,importance=TRUE,na.action=na.omit)
+#pred=predict(rf,test)
+#test$Loan_Status=pred
+
+
+library(rpart)
+library(mlbench)
+library(adabag)
+#red in below plot sales less than margin red is issue with the result
+#plot(margin(rf,test))
+#data(train, package="MASS")
+
+#tune.rf <- tuneRF(train[5],train[-5],stepFactor =0.5 )
+#print( tune.rf)
+#print(rf)
+ #iris.adaboost <- boosting(Species~., data=iris, boos=TRUE,
+#mfinal=6)
+#importanceplot(iris.adaboost)
+#sub <- c(sample(1:50, 35), sample(51:100, 35), sample(101:150, 35))
+#print(sub)
+
+
+
+bst<- boosting(formula, data=train, boos=TRUE,mfinal=4.95)
+importanceplot(bst)
+
+sub <- c( sample(1:100, 100),sample(101:201, 100), sample(202:302, 100), sample(303:614, 311) )
+#bagresult <- bagging(formula, data=train[sub,], mfinal=100)
+#pred1<- predict.bagging(bagresult, newdata=test)
+pred<- predict.bagging(bst, newdata=test)
+test$Loan_Status<-pred$class
+ 
+
+
+ #############################6. Generate Output
+
+
+
+write.csv(file="output.csv",c(test["Loan_ID"],test["Loan_Status"]), row.names=F)
+
+
+#result:Your score for this submission is : 0.770833333333. 
